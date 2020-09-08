@@ -66,19 +66,47 @@ mod tests {
         let mut m0 = Machine::new();
         m0.mem[0] = 0x00;
         assert_eq!(m0.is_halted(), false);
-        m0.step();
+        m0.fetch_and_execute();
+        assert_eq!(m0.is_halted(), true);
+    }
+
+    #[test]
+    fn test_halt_program_invalid() {
+        let mut m0 = Machine::new();
+        m0.mem[0] = 0x00FF; // testing that there's not an issue with endian-ness
+        m0.mem[1] = 0xFF00;
+        m0.mem[2] = 0x0000;
+        assert_eq!(m0.is_halted(), false);
+        m0.fetch_and_execute();
+        assert_eq!(m0.is_halted(), false);
+        m0.fetch_and_execute();
+        assert_eq!(m0.is_halted(), false);
+        m0.fetch_and_execute();
         assert_eq!(m0.is_halted(), true);
     }
 
     #[test]
     fn test_example_program_1() {
         let prog:[u16; 6] = [ 0x0900, 0x0080, 0x0180, 0x0400, 0x1300, 0x0080 ];
+        //                       add     <a>     (<b> +   4)     out     <a>
+        let mut m0 = Machine::new();
+        for n in 0..4 {
+            m0.mem[n] = prog[n];
+        }
+    }
 
-        // a: 0, b: 0, ..., g: 0
-        // 0009 8000 8001 0400
-        // add   <a> (<b> + 4)
-        // 1300 8000
-        // out   <a>
+    #[test]
+    fn test_example_program_2() {
+        let prog:[u16; 4] = [ 0x1300, 0x0300, 0x0000, 0x4100 ];
+        // OUT <0x0003> HLT 'A'
+        let mut m0 = Machine::new();
+        for n in 0..4 {
+            m0.mem[n] = prog[n];
+        }
+        while !m0.is_halted() {
+            m0.fetch_and_execute();
+        }
+        // TODO: assert that stdout == 'A' somehow
     }
 
 }
