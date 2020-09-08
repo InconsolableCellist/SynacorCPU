@@ -1,22 +1,28 @@
-use crate::ERROR::MEM_INVALID_ADDRESS;
-use std::ops::Index;
+mod tests;
+
+use std::ops::{Index, IndexMut};
 use std::fmt;
 
-const TOM:usize = 32768; // Top Of Memory
+const TOM:usize = 0x8000; // Top Of Memory
+const NUM_REG:usize = 8;
+
+// status reg
+// x = undefined
+// x x x x    x x x HLT?
+const HALT_BIT:u8 = 0;
 
 struct Machine {
     mem:[u16; TOM],
     stack:Vec<u16>,
-    registers:[u16; 7],
-
+    registers:[u16; NUM_REG],
     pc:u16,
+    status:u8,
 }
 
 struct MemInvalidError;
-
 impl fmt::Display for MemInvalidError {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid memory accesss")
+        write!(f, "Invalid memory access")
     }
 }
 
@@ -31,152 +37,59 @@ impl Index<u16> for Machine {
     }
 }
 
+impl IndexMut<u16> for Machine {
+    fn index_mut(&mut self, addr: u16) -> &mut Self::Output {
+        if addr < (TOM as u16) {
+            &mut self.mem[addr as usize]
+        } else {
+            panic!(MemInvalidError);
+        }
+    }
+}
+
 impl Machine {
     fn new() -> Self {
         Machine {
             stack: vec![],
-            registers: [0; 7],
+            registers: [0; NUM_REG],
             pc: 0,
             mem:[0; TOM],
+            status: 0,
         }
     }
 
-    fn peek(&self, addr:u16) -> Result<u16, ERROR> {
-        if addr > (TOM as u16) {
-            if addr < (TOM as u16 + 8) {
-                self.registers[TOM - addr as usize];
-            }
-            Err(MEM_INVALID_ADDRESS)
-        } else {
-            Ok(self.mem[addr as usize])
+    pub fn step(&mut self) {
+        if !self.is_halted() {
+            self.decode(self.mem[self.pc as usize]);
+            self.pc += 1;
         }
     }
 
-    fn poke(&mut self, addr:u16, val:u16) -> Result<(), ERROR> {
-/*        if addr > (TOM as u16) {
-            if addr < (TOM as u16 + 8) {
-                self.registers[TOM - addr as usize] = val;
-            } else {
-                Err(MEM_INVALID_ADDRESS)
-            }
+    pub fn is_halted(&self) -> bool {
+        if (self.status & (1 << HALT_BIT)) == 1 {
+            true
         } else {
-            self.mem[addr as usize] = val;
+            false
         }
-        */
-        Ok(())
+    }
+
+    fn nop(&self) {
+    }
+
+
+    fn decode(&mut self, instruction:u16) {
+        match instruction {
+            0x00 => self.halt(),
+            _ => self.nop()
+        }
+    }
+
+    fn halt(&mut self) {
+        self.status |= (1 << HALT_BIT);
     }
 }
 
-
+// see tests.rs
 fn main() {
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{Machine, TOM};
-
-    #[test]
-    fn test_mem() {
-        let mut m0 = Machine::new();
-
-        assert_eq!((m0[(TOM - 1) as u16]), 0); // last u16 in memory
-        assert_eq!((m0[(0) as u16]), 0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_mem_invalid() {
-        let mut m0 = Machine::new();
-        assert_eq!((m0[(TOM) as u16]), 0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_mem_invalid_1() {
-        let mut m0 = Machine::new();
-        assert_eq!((m0[(TOM+1) as u16]), 0);
-    }
-}
-
-
-/*
-== Synacor Challenge ==
-In this challenge, your job is to use this architecture spec to create a
-virtual machine capable of running the included binary.  Along the way,
-you will find codes; submit these to the challenge website to track
-your progress.  Good luck!
-
-
-== architecture ==
-- three storage regions
-- memory with 15-bit address space storing 16-bit values
-- eight registers
-- an unbounded stack which holds individual 16-bit values
-- all numbers are unsigned integers 0..32767 (15-bit)
-- all math is modulo 32768; 32758 + 15 => 5
-
-== binary format ==
-- each number is stored as a 16-bit little-endian pair (low byte, high byte)
-- numbers 0..32767 mean a literal value
-- numbers 32768..32775 instead mean registers 0..7
-- numbers 32776..65535 are invalid
-- programs are loaded into memory starting at address 0
-- address 0 is the first 16-bit value, address 1 is the second 16-bit value, etc
-
-== execution ==
-- After an operation is executed, the next instruction to read is immediately after the last argument of the current operation.  If a jump was performed, the next operation is instead the exact destination of the jump.
-- Encountering a register as an operation argument should be taken as reading from the register or setting into the register as appropriate.
-
-== hints ==
-- Start with operations 0, 19, and 21.
-- Here's a code for the challenge website: GjsjktQBGFWj
-- The program "9,32768,32769,4,19,32768" occupies six memory addresses and should:
-- Store into register 0 the sum of 4 and the value contained in register 1.
-- Output to the terminal the character with the ascii code contained in register 0.
-
-== opcode listing ==
-halt: 0
-stop execution and terminate the program
-set: 1 a b
-set register <a> to the value of <b>
-push: 2 a
-push <a> onto the stack
-pop: 3 a
-remove the top element from the stack and write it into <a>; empty stack = error
-eq: 4 a b c
-set <a> to 1 if <b> is equal to <c>; set it to 0 otherwise
-gt: 5 a b c
-set <a> to 1 if <b> is greater than <c>; set it to 0 otherwise
-jmp: 6 a
-jump to <a>
-jt: 7 a b
-if <a> is nonzero, jump to <b>
-jf: 8 a b
-if <a> is zero, jump to <b>
-add: 9 a b c
-assign into <a> the sum of <b> and <c> (modulo 32768)
-mult: 10 a b c
-store into <a> the product of <b> and <c> (modulo 32768)
-mod: 11 a b c
-store into <a> the remainder of <b> divided by <c>
-and: 12 a b c
-stores into <a> the bitwise and of <b> and <c>
-or: 13 a b c
-stores into <a> the bitwise or of <b> and <c>
-not: 14 a b
-stores 15-bit bitwise inverse of <b> in <a>
-rmem: 15 a b
-read memory at address <b> and write it to <a>
-wmem: 16 a b
-write the value from <b> into memory at address <a>
-call: 17 a
-write the address of the next instruction to the stack and jump to <a>
-ret: 18
-remove the top element from the stack and jump to it; empty stack = halt
-out: 19 a
-write the character represented by ascii code <a> to the terminal
-in: 20 a
-read a character from the terminal and write its ascii code to <a>; it can be assumed that once input starts, it will continue until a newline is encountered; this means that you can safely read whole lines from the keyboard and trust that they will be fully read
-noop: 21
-no operation
-*/
