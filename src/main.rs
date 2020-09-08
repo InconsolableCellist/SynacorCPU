@@ -1,5 +1,6 @@
 use crate::ERROR::MEM_INVALID_ADDRESS;
 use std::ops::Index;
+use std::fmt;
 
 const TOM:usize = 32768; // Top Of Memory
 
@@ -11,30 +12,22 @@ struct Machine {
     pc:u16,
 }
 
-enum ERROR {
-    MEM_INVALID_ADDRESS
+struct MemInvalidError;
+
+impl fmt::Display for MemInvalidError {
+    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid memory accesss")
+    }
 }
 
 impl Index<u16> for Machine {
     type Output = u16;
-    fn index(&self, addr: u16) -> Result<&u16, ERROR> {
+    fn index(&self, addr: u16) -> &u16 {
         if addr < (TOM as u16) {
-            Ok(&self.mem[addr as usize])
-        } else {
-            Err(ERROR::MEM_INVALID_ADDRESS)
-        }
-
-
-       /* if addr >= (TOM as u16) {
-            if addr < (TOM as u16 + 8) {
-                &self.registers[TOM - addr as usize]
-            } else {
-                &1
-            }
-        } else {
             &self.mem[addr as usize]
+        } else {
+            panic!(MemInvalidError);
         }
-        */
     }
 }
 
@@ -83,20 +76,25 @@ mod tests {
     use crate::{Machine, TOM};
 
     #[test]
-    fn test_machine() {
-        test_mem();
+    fn test_mem() {
+        let mut m0 = Machine::new();
+
+        assert_eq!((m0[(TOM - 1) as u16]), 0); // last u16 in memory
+        assert_eq!((m0[(0) as u16]), 0);
     }
 
     #[test]
-    fn test_mem() {
+    #[should_panic]
+    fn test_mem_invalid() {
         let mut m0 = Machine::new();
-        m0.registers[0] = 10;
-        assert_eq!((m0[(TOM - 1) as u16]), 0); // last u16 in memory
+        assert_eq!((m0[(TOM) as u16]), 0);
+    }
 
-        #[should_panic(expected = "fuck")]
-        assert_eq!((m0[(TOM) as u16]), 10); // register 0
-
-        assert_eq!((m0[(TOM + 1) as u16]), 0); // register 0
+    #[test]
+    #[should_panic]
+    fn test_mem_invalid_1() {
+        let mut m0 = Machine::new();
+        assert_eq!((m0[(TOM+1) as u16]), 0);
     }
 }
 
