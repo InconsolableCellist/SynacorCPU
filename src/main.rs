@@ -10,8 +10,9 @@ const NUM_REG:usize = 8;
 
 // status reg
 // x = undefined
-// x x x x    OUT MEMR M1 HLT?
-const OUT_BIT:u16 = 3;      // IO event
+// x x x OUT    MEMW MEMR M1 HLT?
+const OUT_BIT:u16 = 4;      // IO event
+const MEMW_BIT:u16 = 3;     // mem read
 const MEMR_BIT:u16 = 2;     // mem read
 const M1_BIT:u16 = 1;       // M1 cycle
 const HALT_BIT:u16 = 0;
@@ -38,6 +39,37 @@ fn get_bit(data:&u16, bit_position:u16) -> bool {
  */
 fn swap_endian(ushort:u16) -> u16 {
     (ushort << 8) | (ushort >> 8)
+}
+
+fn peek_inc(status_register:&mut u16, mem:[u16; TOM], address:&mut u16) -> u16 {
+    set_bit(status_register, MEMR_BIT);
+    let val:u16 = swap_endian(mem[*address as usize]);
+    clear_bit(status_register, MEMR_BIT);
+    *address += 1;
+
+    return val;
+}
+
+fn peek(status_register:&mut u16, mem:[u16; TOM], address:u16) -> u16 {
+    set_bit(status_register, MEMR_BIT);
+    let val:u16 = swap_endian(mem[address as usize]);
+    clear_bit(status_register, MEMR_BIT);
+
+    return val;
+}
+
+fn poke_inc(status_register:&mut u16, mem:&mut [u16; TOM], address:&mut u16, value:u16) {
+    clear_bit(status_register, MEMW_BIT);
+    mem[*address as usize] = swap_endian(value);
+    clear_bit(status_register, MEMW_BIT);
+
+    *address += 1;
+}
+
+fn poke(status_register:&mut u16, mem:&mut [u16; TOM], address:u16, value:u16) {
+    clear_bit(status_register, MEMW_BIT);
+    mem[address as usize] = swap_endian(value);
+    clear_bit(status_register, MEMW_BIT);
 }
 
 struct Machine {
@@ -132,27 +164,6 @@ impl Machine {
         }
     }
 
-    fn peek(&mut self, address:&mut u16, increment_addr:bool) -> u16 {
-        set_bit(&mut self.status, MEMR_BIT);
-        let val:u16 = swap_endian(self.mem[*address as usize]);
-        clear_bit(&mut self.status, MEMR_BIT);
-
-        if increment_addr {
-            *address += 1;
-        }
-        return val;
-    }
-
-    fn poke(&mut self, address:&mut u16, value:u16, increment_addr:bool) {
-        clear_bit(&mut self.status, MEMR_BIT);
-        self.mem[*address as usize] = swap_endian(value);
-        clear_bit(&mut self.status, MEMR_BIT);
-
-        if increment_addr {
-            *address += 1;
-        }
-    }
-
     /**
      * Stops execution and terminates the program
      */
@@ -164,25 +175,19 @@ impl Machine {
      * Assign into <a> the sum of <b> and <c> (modulo 0x8000)
      */
     fn add(&mut self) {
-    /*
-        let dest_p:u16 = self.peek(self.pc);
-        self.pc += 1;
-        let mut sum:u16 = self.peek(self.pc);
-        self.pc += 1;
-        sum += self.peek(self.pc);
-        */
+        let dest_p:u16 = peek_inc(&mut self.status, self.mem, &mut self.pc);
+        let mut sum:u16 = peek_inc(&mut self.status, self.mem, &mut self.pc);
+        sum += peek_inc(&mut self.status, self.mem, &mut self.pc);
+
+        poke(&mut self.status, &mut self.mem, dest_p, sum);
     }
 
     /**
      * Writes the character represented by ASCII code <a> to the terminal
      */
     fn out(&mut self) {
-        // fetch arg
-        let pointer:u16 = self.peek(&mut self.pc, true);
-
-        // obtain value
-        //let val:u16 = self.peek(&mut pointer, false);
-        let val:u16 = 0;
+        let pointer:u16 = peek_inc(&mut self.status, self.mem, &mut self.pc);
+        let val:u16 = peek(&mut self.status, self.mem, pointer);
 
         // ASCII output
         set_bit(&mut self.status, OUT_BIT);
