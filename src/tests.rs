@@ -71,9 +71,10 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
     fn test_halt_program_invalid() {
         let mut m0 = Machine::new();
-        m0.mem[0] = 0x00FF; // testing that there's not an issue with endian-ness
+        m0.mem[0] = 0x00FF; // unknown opcode
         m0.mem[1] = 0xFF00;
         m0.mem[2] = 0x0000;
         assert_eq!(m0.is_halted(), false);
@@ -90,9 +91,10 @@ mod tests {
         let prog:[u16; 6] = [ 0x0900, 0x0080, 0x0180, 0x0400, 0x1300, 0x0080 ];
         //                       add     <a>     (<b> +   4)     out     <a>
         let mut m0 = Machine::new();
-        for n in 0..4 {
+        for n in 0..6 {
             m0.mem[n] = prog[n];
         }
+        m0.run();
     }
 
     #[test]
@@ -103,9 +105,7 @@ mod tests {
         for n in 0..4 {
             m0.mem[n] = prog[n];
         }
-        while !m0.is_halted() {
-            m0.fetch_and_execute();
-        }
+        m0.run();
         // TODO: assert that stdout == 'A' somehow
     }
 

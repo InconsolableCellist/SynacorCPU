@@ -48,10 +48,16 @@ struct Machine {
     status:u16,
 }
 
-struct MemInvalidError;
-impl fmt::Display for MemInvalidError {
+struct ErrorMemoryInvalid;
+impl fmt::Display for ErrorMemoryInvalid {
     fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
         write!(f, "Invalid memory access")
+    }
+}
+struct ErrorUnknownOpcode;
+impl fmt::Display for ErrorUnknownOpcode {
+    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Unknown opcode")
     }
 }
 
@@ -61,7 +67,7 @@ impl Index<u16> for Machine {
         if addr < (TOM as u16) {
             &self.mem[addr as usize]
         } else {
-            panic!(MemInvalidError);
+            panic!(ErrorMemoryInvalid);
         }
     }
 }
@@ -71,7 +77,7 @@ impl IndexMut<u16> for Machine {
         if addr < (TOM as u16) {
             &mut self.mem[addr as usize]
         } else {
-            panic!(MemInvalidError);
+            panic!(ErrorMemoryInvalid);
         }
     }
 }
@@ -105,6 +111,12 @@ impl Machine {
         }
     }
 
+    pub fn run(&mut self) {
+        while !self.is_halted() {
+            self.fetch_and_execute();
+        }
+    }
+
     pub fn is_halted(&self) -> bool {
         get_bit(&self.status, HALT_BIT)
     }
@@ -112,10 +124,32 @@ impl Machine {
     fn execute(&mut self, instruction:u16) {
         match instruction {
             0x0000 => self.halt(),      // `halt`
+            0x0009 => self.add(),
             0x0013 => self.out(),       // `out`  0d19
 
             0x0015 => self.nop(),       // `noop` 0d21
-            _ => self.nop()
+            _ => panic!(ErrorUnknownOpcode)
+        }
+    }
+
+    fn peek(&mut self, address:&mut u16, increment_addr:bool) -> u16 {
+        set_bit(&mut self.status, MEMR_BIT);
+        let val:u16 = swap_endian(self.mem[*address as usize]);
+        clear_bit(&mut self.status, MEMR_BIT);
+
+        if increment_addr {
+            *address += 1;
+        }
+        return val;
+    }
+
+    fn poke(&mut self, address:&mut u16, value:u16, increment_addr:bool) {
+        clear_bit(&mut self.status, MEMR_BIT);
+        self.mem[*address as usize] = swap_endian(value);
+        clear_bit(&mut self.status, MEMR_BIT);
+
+        if increment_addr {
+            *address += 1;
         }
     }
 
@@ -127,17 +161,28 @@ impl Machine {
     }
 
     /**
+     * Assign into <a> the sum of <b> and <c> (modulo 0x8000)
+     */
+    fn add(&mut self) {
+    /*
+        let dest_p:u16 = self.peek(self.pc);
+        self.pc += 1;
+        let mut sum:u16 = self.peek(self.pc);
+        self.pc += 1;
+        sum += self.peek(self.pc);
+        */
+    }
+
+    /**
      * Writes the character represented by ASCII code <a> to the terminal
      */
     fn out(&mut self) {
         // fetch arg
-        set_bit(&mut self.status, MEMR_BIT);
-        let pointer:u16 = swap_endian(self.mem[self.pc as usize]);
-        self.pc += 1;
+        let pointer:u16 = self.peek(&mut self.pc, true);
 
         // obtain value
-        let val:u16 = swap_endian(self.mem[pointer as usize]);
-        clear_bit(&mut self.status, MEMR_BIT);
+        //let val:u16 = self.peek(&mut pointer, false);
+        let val:u16 = 0;
 
         // ASCII output
         set_bit(&mut self.status, OUT_BIT);
