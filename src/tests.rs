@@ -95,6 +95,7 @@ mod tests {
             m0.mem[n] = prog[n];
         }
         m0.run();
+        assert_eq!(m0.peek(0x8000), 4);
     }
 
     #[test]
