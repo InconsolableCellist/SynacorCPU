@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::char;
 use core::mem;
 
-const TOM:usize = 0x8000; // Top Of Memory
+const TOM:usize = 0x8000; // Top Of Memory, exclusive (mem: 0x0000-0x7FFF inclusive)
 const NUM_REG:usize = 8;
 
 // status reg
@@ -87,7 +87,7 @@ impl IndexMut<u16> for Machine {
 impl Machine {
     fn new() -> Self {
         Machine {
-            stack: vec![],
+            stack: Vec::new(),
             registers: [0; NUM_REG],
             pc: 0,
             mem:[0; TOM],
@@ -112,11 +112,11 @@ impl Machine {
     }
 
     /**
-     * Gets the memory or register at `destination` and returns it
-     * if `dest_addr` is < TOM, then `destination` = mem[dest_addr]
-     * otherwise `dest_addr` refers to a register: TOM, TOM+1, ... TOM+7 = registers[0...7]
+     * Gets the memory or register at `destination` (see below), converts it to big-endian, and returns it.
+     * If `dest_addr` (big-endian) is `<` `TOM`, then `destination` = `mem[dest_addr]`
+     * otherwise `dest_addr` refers to a register 0...7: `TOM, TOM+1, ... TOM+7 = registers[0...7]`
      *
-     * Sets and clears the MEMR flag in the status register
+     * Sets and clears the `MEMR` flag in the status register
      */
     fn peek(&mut self, dest_addr:u16) -> u16 {
         set_bit(&mut self.status, MEMR_BIT);
@@ -137,16 +137,16 @@ impl Machine {
      * Sets the memory or register at `destination` to `value`
      * `value` should be provided big-endian, and it will be converted to
      * little-endian
-     * If `dest_addr` is < TOM, then `destination` = mem[dest_addr]
-     * otherwise `dest_addr` refers to a register: TOM, TOM+1, ... TOM+7 = registers[0...7]
+     * If `dest_addr` is `<` `TOM`, then `destination` = `mem[dest_addr]`
+     * otherwise `dest_addr` refers to a register 0...7: `TOM, TOM+1, ... TOM+7 = registers[0...7]`
      *
-     * Sets and clears the MEMW flag in the status register
+     * Sets and clears the `MEMW` flag in the status register
      */
     fn poke(&mut self, dest_addr:u16, value:u16) {
         set_bit(&mut self.status, MEMW_BIT);
         if dest_addr < TOM as u16 {
             self.mem[dest_addr as usize] = swap_endian(value);
-        } else if dest_addr < (TOM+8) as u16 {
+        } else if dest_addr <= (TOM+7) as u16 {
             self.registers[(dest_addr % (TOM as u16)) as usize] = swap_endian(value);
         } else {
             panic!(ErrorMemoryInvalid);
@@ -156,7 +156,7 @@ impl Machine {
 
     /**
      * Performs the M1 operation to fetch the opcode from mem[pc], swaps its endian-ness
-     * and then executes
+     * (from LE to BE) and then executes. The fetch increments `pc`
      */
     pub fn fetch_and_execute(&mut self) {
         if !self.is_halted() {
@@ -168,19 +168,32 @@ impl Machine {
         }
     }
 
+    /**
+     * Starts CPU execution at `pc` and continues until `HLT` is set in the status register
+     */
     pub fn run(&mut self) {
         while !self.is_halted() {
             self.fetch_and_execute();
         }
     }
 
+    /**
+     * Returns `true` if the CPU is halted. `false` otherwise
+     */
     pub fn is_halted(&self) -> bool {
         get_bit(&self.status, HALT_BIT)
     }
 
+    /**
+     * Given `instruction`, calls the appropriate function to execute the opcode.
+     * If `instruction` can't decode into a known instruction, an `ErrorUnknownOpcode`
+     * panic occurs.
+     */
     fn execute(&mut self, instruction:u16) {
         match instruction {
             0x0000 => self.halt(),      // `halt`
+            0x0001 => self.set(),
+            0x0002 => self.push(),
             0x0009 => self.add(),
             0x0013 => self.out(),       // `out`  0d19
 
@@ -194,6 +207,28 @@ impl Machine {
      */
     fn halt(&mut self) {
         set_bit(&mut self.status, HALT_BIT);
+    }
+
+    /**
+     * Set register <a> to the value of <b>
+     */
+    fn set(&mut self) {
+        let a_p:u16 = self.peek_inc();
+        // let value:u16 = self.peek(self.peek_inc());
+        let value_p:u16 = self.peek_inc();
+        let value:u16 = self.peek(value_p);
+
+        self.poke(a_p, value);
+    }
+
+    /**
+     * Pushes <a> onto the stack
+     */
+    fn push(&mut self) {
+        let a_p:u16 = self.peek_inc();
+        let value:u16 = self.peek(a_p);
+
+        self.stack.push(value);
     }
 
     /**
@@ -213,8 +248,6 @@ impl Machine {
      * Writes the character represented by ASCII code <a> to the terminal
      */
     fn out(&mut self) {
-        // let pointer:u16 = peek_inc(&mut self.status, self.mem, &mut self.pc);
-        // let val:u16 = peek(&mut self.status, self.mem, pointer);
         let dest_p:u16 = self.peek_inc();
         let val:u16 = self.peek(dest_p);
 
@@ -225,6 +258,9 @@ impl Machine {
         clear_bit(&mut self.status, OUT_BIT);
     }
 
+    /**
+     * No operation is performed
+     */
     fn nop(&self) {
     }
 }

@@ -110,4 +110,31 @@ mod tests {
         // TODO: assert that stdout == 'A' somehow
     }
 
+    #[test]
+    fn test_set() {
+        let prog:[u16; 5] = [ 0x0100, 0x0480, 0x0400, 0x0000, 0xFF00 ];
+        // SET e 0x00FF HLT
+        let mut m0 = Machine::new();
+        for n in 0..5 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8004), 0x00FF);
+        assert_eq!(m0.registers[4], 0xFF00);
+    }
+
+    #[test]
+    fn test_push() {
+        let prog:[u16; 7] = [ 0x0200, 0x0500, 0x0200, 0x0600, 0x0000, 0xAA00, 0x00FF ];
+        // PUSH <0x0005> PUSH <0x0006> HLT
+        //      (0x00AA)      (0xFF00)
+        let mut m0 = Machine::new();
+        for n in 0..5 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.stack[0], 0xAA00);
+        assert_eq!(m0.stack[1], 0x00FF);
+    }
+
 }
