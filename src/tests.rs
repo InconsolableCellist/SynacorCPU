@@ -87,9 +87,9 @@ mod tests {
     }
 
     #[test]
-    fn test_example_program_1() {
-        let prog:[u16; 6] = [ 0x0900, 0x0080, 0x0180, 0x0400, 0x1300, 0x0080 ];
-        //                       add     <a>     (<b> +   4)     out     <a>
+    fn test_add() {
+        let mut prog:[u16; 7] = [ 0x0900, 0x0080, 0x0180, 0x0400, 0x1300, 0x0080, 0x0000 ];
+        //                       add       a     (<b> +   4)     out     <a>         HLT
         let mut m0 = Machine::new();
         for n in 0..6 {
             m0.mem[n] = prog[n];
@@ -98,12 +98,26 @@ mod tests {
         assert_eq!(m0.peek(0x8000), 4);
     }
 
+/*    #[test]
+    fn test_add_2() {
+        let mut prog:[u16; 7] = [ 0x0900, 0xFF79, 0x0800, 0x0400, 0x1300, 0x0080, 0x0000 ];
+        //                           add  0x79FF   (8 +   4)        out   0x8000   HLT
+        rmem 0xFF79
+        let mut m0 = Machine::new();
+        for n in 0..6 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x79FF), 12);
+    }
+ */
+
     #[test]
     fn test_example_program_2() {
         let prog:[u16; 4] = [ 0x1300, 0x0300, 0x0000, 0x4100 ];
         // OUT <0x0003> HLT 'A'
         let mut m0 = Machine::new();
-        for n in 0..4 {
+        for n in 0..3 {
             m0.mem[n] = prog[n];
         }
         m0.run();
@@ -112,10 +126,10 @@ mod tests {
 
     #[test]
     fn test_set() {
-        let prog:[u16; 5] = [ 0x0100, 0x0480, 0x0400, 0x0000, 0xFF00 ];
+        let prog:[u16; 4] = [ 0x0100, 0x0480, 0xFF00, 0x0000 ];
         // SET e 0x00FF HLT
         let mut m0 = Machine::new();
-        for n in 0..5 {
+        for n in 0..4 {
             m0.mem[n] = prog[n];
         }
         m0.run();
@@ -125,11 +139,10 @@ mod tests {
 
     #[test]
     fn test_push() {
-        let prog:[u16; 7] = [ 0x0200, 0x0500, 0x0200, 0x0600, 0x0000, 0xAA00, 0x00FF ];
-        // PUSH <0x0005> PUSH <0x0006> HLT
-        //      (0x00AA)      (0xFF00)
+        let prog:[u16; 5] = [ 0x0200, 0x00AA, 0x0200, 0xFF00, 0x0000 ];
+        //                      PUSH  0xAA00    PUSH  0x00FF    HALT
         let mut m0 = Machine::new();
-        for n in 0..5 {
+        for n in 0..4 {
             m0.mem[n] = prog[n];
         }
         m0.run();
@@ -137,4 +150,16 @@ mod tests {
         assert_eq!(m0.stack[1], 0x00FF);
     }
 
+    #[test]
+    fn test_push_pop() {
+        let prog:[u16; 9] = [ 0x0200, 0x00AA, 0x0200, 0xFF00, 0x0300, 0x0080, 0x0300, 0x0001, 0x0000 ];
+        //                      PUSH  0xAA00    PUSH  0x00FF     POP  0x8000     POP  0x0100    HALT
+        let mut m0 = Machine::new();
+        for n in 0..8 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 0x00FF);
+        assert_eq!(m0.peek(0x0100), 0xAA00);
+    }
 }

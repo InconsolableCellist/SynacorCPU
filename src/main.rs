@@ -63,6 +63,13 @@ impl fmt::Display for ErrorUnknownOpcode {
     }
 }
 
+struct ErrorEmptyStack;
+impl fmt::Display for ErrorEmptyStack {
+    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Attempted to pop off an empty stack")
+    }
+}
+
 impl Index<u16> for Machine {
     type Output = u16;
     fn index(&self, addr: u16) -> &u16 {
@@ -97,7 +104,7 @@ impl Machine {
 
     /**
      * Fetches the value at mem[pc], converts it to big-endian, increments the pc
-     * and returns the value
+     * and returns the value.
      *
      * Sets and clears the MEMR flag in the status register
      */
@@ -194,6 +201,7 @@ impl Machine {
             0x0000 => self.halt(),      // `halt`
             0x0001 => self.set(),
             0x0002 => self.push(),
+            0x0003 => self.pop(),
             0x0009 => self.add(),
             0x0013 => self.out(),       // `out`  0d19
 
@@ -210,46 +218,63 @@ impl Machine {
     }
 
     /**
-     * Set register <a> to the value of <b>
+     * Set register a to the immediate value of b
      */
     fn set(&mut self) {
-        let a_p:u16 = self.peek_inc();
-        // let value:u16 = self.peek(self.peek_inc());
-        let value_p:u16 = self.peek_inc();
-        let value:u16 = self.peek(value_p);
+        let dest:u16 = self.peek_inc();
+        let value:u16 = self.peek_inc();
 
-        self.poke(a_p, value);
+        self.poke(dest, value);
     }
 
     /**
-     * Pushes <a> onto the stack
+     * Pushes immediate value a onto the stack
      */
     fn push(&mut self) {
-        let a_p:u16 = self.peek_inc();
-        let value:u16 = self.peek(a_p);
-
+        let value:u16 = self.peek_inc();
         self.stack.push(value);
     }
 
     /**
-     * Assign into <a> the sum of <b> and <c> (modulo 0x8000)
+     * Remove the top element from the stack and write it into a
+     * An empty stack panics
      */
-    fn add(&mut self) {
-        let dest_p:u16 = self.peek_inc();
-        let operand_1_p:u16 = self.peek_inc();
-        let mut sum:u16 = self.peek(operand_1_p);
-        sum += self.peek_inc();
-        sum %= TOM as u16;
-
-        self.poke(dest_p, sum);
+    fn pop(&mut self) {
+        let value:u16 = match self.stack.pop() {
+            Some(p) => p,
+            None => panic!(ErrorEmptyStack)
+        };
+        let dest:u16 = self.peek_inc();
+        self.poke(dest, value);
     }
 
     /**
-     * Writes the character represented by ASCII code <a> to the terminal
+     * Assign into a the sum of immediate values b and c (modulo 0x8000)
+     */
+    fn add(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let mut sum:u16 = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if sum >= TOM as u16 {
+            sum = self.peek(sum);
+        }
+
+        sum += self.peek_inc();
+        sum %= TOM as u16;
+
+        self.poke(dest, sum);
+    }
+
+    /**
+     * Writes the character represented by immediate ASCII code a to the terminal
      */
     fn out(&mut self) {
-        let dest_p:u16 = self.peek_inc();
-        let val:u16 = self.peek(dest_p);
+        let mut val:u16 = self.peek_inc();
+
+        if val >= TOM as u16 {
+            val = self.peek(val);
+        }
 
         // ASCII output
         set_bit(&mut self.status, OUT_BIT);
