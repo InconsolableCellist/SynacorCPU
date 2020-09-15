@@ -162,4 +162,127 @@ mod tests {
         assert_eq!(m0.peek(0x8000), 0x00FF);
         assert_eq!(m0.peek(0x0100), 0xAA00);
     }
+
+    #[test]
+    fn test_eq() {
+        let prog:[u16; 12] = [ 0x0100, 0x0080, 0xFFFF, 0x0400, 0x0001, 0xAAAA, 0xAAAA, 0x0400, 0x0080, 0xAAAA, 0xAAAB, 0x0000 ];
+        //                       SET       A   0xFFFF      EQ  0x0100  0xAAAA  0xAAAA      EQ       A  0xAAAA  0xABAA,   HALT
+        let mut m0 = Machine::new();
+        for n in 0..11 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x0100), 0x0001);
+        assert_eq!(m0.peek(0x8000), 0x0000);
+    }
+
+    #[test]
+    fn test_gt() {
+        let prog:[u16; 12] = [ 0x0100, 0x0080, 0xFFFF, 0x0500, 0x0001, 0xAAAA, 0xAAAA, 0x0500, 0x0080, 0xAAAA, 0xAAA9, 0x0000 ];
+        //                       SET       A   0xFFFF      LT  0x0100  0xAAAA  0xAAAA      LT       A  0xAAAA  0xA9AA,   HALT
+        let mut m0 = Machine::new();
+        for n in 0..11 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x0100), 0x0000);
+        assert_eq!(m0.peek(0x8000), 0x0001);
+    }
+
+    #[test]
+    fn test_jmp() {
+        let prog:[u16; 7] = [ 0x0600, 0x0300, 0x0000, 0x0100, 0x0080, 0xFFFF, 0x0000 ];
+        //                       JMP  0x0003    HALT     SET       A  0xFFFF    HALT
+        let mut m0 = Machine::new();
+        for n in 0..6 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 0xFFFF);
+    }
+
+    #[test]
+    fn test_jt() {
+        let prog:[u16; 7] = [ 0x0700, 0x0100, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0000 ];
+        //                        JT  0x0001  0x0006     SET       a  0xFFFF    HALT
+        let mut m0 = Machine::new();
+        for n in 0..6 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 0x0000);
+    }
+
+    #[test]
+    fn test_jf() {
+        let prog:[u16; 7] = [ 0x0800, 0x0000, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0000 ];
+        //                        JF  0x0000  0x0006     SET       a  0xFFFF    HALT
+        let mut m0 = Machine::new();
+        for n in 0..6 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 0x0000);
+    }
+
+    #[test]
+    fn test_mult() {
+        let mut prog:[u16; 8] = [ 0x0100, 0x0080, 0xFF00, 0x0A00, 0x0180, 0x0080, 0x0400, 0x0000 ];
+        //                           SET       a  0x00FF    MULT       b       a  0x0004    HALT
+        let mut m0 = Machine::new();
+        for n in 0..7 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8001), 0x00FF * 4);
+    }
+
+    #[test]
+    fn test_mod() {
+        let mut prog:[u16; 5] = [ 0x0B00, 0x0080, 0xFF00, 0x0A00, 0x0000 ];
+        //                           MOD       a  0x00FF  0x000A    HALT
+
+        let mut m0 = Machine::new();
+        for n in 0..4 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 5);
+    }
+
+    #[test]
+    fn test_and() {
+        let mut prog:[u16; 5] = [ 0x0C00, 0x0080, 0xAA00, 0xDEDE, 0x0000 ];
+        //                           AND       a  0x00AA  0xDEDE    HALT
+        let mut m0 = Machine::new();
+        for n in 0..4 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 0x00AA & (0xDEDE % TOM as u16));
+    }
+
+    #[test]
+    fn test_or() {
+        let mut prog:[u16; 5] = [ 0x0D00, 0x0080, 0xAA00, 0xDE00, 0x0000 ];
+        //                            OR       a  0x00AA  0x00DE    HALT
+        let mut m0 = Machine::new();
+        for n in 0..4 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), 254);
+    }
+
+    #[test]
+    fn test_not() {
+        let mut prog:[u16; 4] = [ 0x0E00, 0x0080, 0xAA00, 0x0000 ];
+        //                           NOT       a  0x00AA    HALT
+        let mut m0 = Machine::new();
+        for n in 0..3 {
+            m0.mem[n] = prog[n];
+        }
+        m0.run();
+        assert_eq!(m0.peek(0x8000), (0xFF00 | 0x0055) % TOM as u16);
+    }
 }

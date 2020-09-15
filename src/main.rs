@@ -1,9 +1,13 @@
 mod tests;
+mod errors;
+
 use std::ops::{Index, IndexMut};
 use std::fmt;
 use std::io::{self, Write};
 use std::char;
 use core::mem;
+use crate::errors::Error::{MemoryInvalid, UnknownOpcode, EmptyStack};
+use std::process::id;
 
 const TOM:usize = 0x8000; // Top Of Memory, exclusive (mem: 0x0000-0x7FFF inclusive)
 const NUM_REG:usize = 8;
@@ -50,33 +54,13 @@ struct Machine {
     status:u16,
 }
 
-struct ErrorMemoryInvalid;
-impl fmt::Display for ErrorMemoryInvalid {
-    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid memory access")
-    }
-}
-struct ErrorUnknownOpcode;
-impl fmt::Display for ErrorUnknownOpcode {
-    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Unknown opcode")
-    }
-}
-
-struct ErrorEmptyStack;
-impl fmt::Display for ErrorEmptyStack {
-    fn fmt(&self, f:&mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Attempted to pop off an empty stack")
-    }
-}
-
 impl Index<u16> for Machine {
     type Output = u16;
     fn index(&self, addr: u16) -> &u16 {
         if addr < (TOM as u16) {
             &self.mem[addr as usize]
         } else {
-            panic!(ErrorMemoryInvalid);
+            panic!(MemoryInvalid);
         }
     }
 }
@@ -86,7 +70,7 @@ impl IndexMut<u16> for Machine {
         if addr < (TOM as u16) {
             &mut self.mem[addr as usize]
         } else {
-            panic!(ErrorMemoryInvalid);
+            panic!(MemoryInvalid);
         }
     }
 }
@@ -133,7 +117,7 @@ impl Machine {
         } else if dest_addr < (TOM+8) as u16 {
             val = self.registers[(dest_addr % (TOM as u16)) as usize];
         } else {
-            panic!(ErrorMemoryInvalid);
+            panic!(MemoryInvalid);
         }
         clear_bit(&mut self.status, MEMR_BIT);
 
@@ -156,7 +140,7 @@ impl Machine {
         } else if dest_addr <= (TOM+7) as u16 {
             self.registers[(dest_addr % (TOM as u16)) as usize] = swap_endian(value);
         } else {
-            panic!(ErrorMemoryInvalid);
+            panic!(MemoryInvalid);
         }
         clear_bit(&mut self.status, MEMW_BIT);
     }
@@ -202,11 +186,22 @@ impl Machine {
             0x0001 => self.set(),
             0x0002 => self.push(),
             0x0003 => self.pop(),
+            0x0004 => self.eq(),
+            0x0005 => self.gt(),
+            0x0006 => self.jmp(),
+            0x0007 => self.jt(),
+            0x0008 => self.jf(),
             0x0009 => self.add(),
-            0x0013 => self.out(),       // `out`  0d19
+            0x000A => self.mult(),
+            0x000B => self.modulo(),
+            0x000C => self.and(),
+            0x000D => self.or(),
+            0x000E => self.not(),
+
+            0x0013 => self.out(),
 
             0x0015 => self.nop(),       // `noop` 0d21
-            _ => panic!(ErrorUnknownOpcode)
+            _ => panic!(UnknownOpcode)
         }
     }
 
@@ -234,6 +229,7 @@ impl Machine {
         let value:u16 = self.peek_inc();
         self.stack.push(value);
     }
+   
 
     /**
      * Remove the top element from the stack and write it into a
@@ -242,10 +238,65 @@ impl Machine {
     fn pop(&mut self) {
         let value:u16 = match self.stack.pop() {
             Some(p) => p,
-            None => panic!(ErrorEmptyStack)
+            None => panic!(EmptyStack)
         };
         let dest:u16 = self.peek_inc();
         self.poke(dest, value);
+    }
+
+    /**
+     * set a to 1 if b is equal than c; set it to 0 otherwise
+     */
+    fn eq(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let c:u16 = self.peek_inc();
+
+        if b == c {
+            self.poke(dest, 1);
+        } else {
+            self.poke(dest, 0);
+        }
+    }
+
+    /**
+     * set a to 1 if b is greater than c; set it to 0 otherwise
+     */
+    fn gt(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let c:u16 = self.peek_inc();
+
+        if b > c {
+            self.poke(dest, 1);
+        } else {
+            self.poke(dest, 0);
+        }
+    }
+
+    /**
+     * jump to a
+     */
+    fn jmp(&mut self) {
+        self.pc = self.peek_inc();
+    }
+
+    /**
+     * if a is nonzero jump to b
+     */
+    fn jt(&mut self) {
+        if self.peek_inc() != 0 {
+            self.pc = self.peek_inc();
+        }
+    }
+
+    /**
+     * if a is 0 jump to b
+     */
+    fn jf(&mut self) {
+        if self.peek_inc() == 0 {
+            self.pc = self.peek_inc();
+        }
     }
 
     /**
@@ -267,6 +318,24 @@ impl Machine {
     }
 
     /**
+     * store into a the product of b and c (modulo 32768)
+     */
+    fn mult(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let mut product:u16 = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if product >= TOM as u16 {
+            product = self.peek(product);
+        }
+
+        product *= self.peek_inc();
+        product %= TOM as u16;
+
+        self.poke(dest, product)
+    }
+
+    /**
      * Writes the character represented by immediate ASCII code a to the terminal
      */
     fn out(&mut self) {
@@ -282,6 +351,49 @@ impl Machine {
         io::stdout().flush().unwrap();
         clear_bit(&mut self.status, OUT_BIT);
     }
+
+    /**
+     * store into a the remainder of b/c
+     */
+    fn modulo(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let c:u16 = self.peek_inc();
+        self.poke(dest, b%c);
+    }
+
+    /**
+     * store into a the bitwise and of b and c
+     */
+    fn and(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let c:u16 = self.peek_inc();
+        let value:u16 = (b&c) % TOM as u16;
+        self.poke(dest, value);
+    }
+
+    /**
+     * store into a the bitwise or of b and c
+     */
+    fn or(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let c:u16 = self.peek_inc();
+        let value:u16 = (b|c) % TOM as u16;
+        self.poke(dest, value);
+    }
+
+    /**
+     * store into a the bitwise inverse of b
+     */
+    fn not(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let b:u16 = self.peek_inc();
+        let value:u16 = (!b) % TOM as u16;
+        self.poke(dest, value);
+    }
+
 
     /**
      * No operation is performed
