@@ -15,6 +15,7 @@ impl fmt::Display for Error {
             MemoryInvalid => write!(f, "Invalid memory access"),
             UnknownOpcode => write!(f, "Unknown opcode"),
             EmptyStack => write!(f, "Attempted to pop off of an empty stack"),
+            FailedToReadLine => write!(f, "Failed to read line from STDIN"),
         }
     }
 }

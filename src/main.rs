@@ -3,18 +3,20 @@ mod errors;
 
 use std::ops::{Index, IndexMut};
 use std::fmt;
-use std::io::{self, Write};
+use std::io::{self, Write, BufRead, Read};
 use std::char;
 use core::mem;
 use crate::errors::Error::{MemoryInvalid, UnknownOpcode, EmptyStack};
 use std::process::id;
+use std::fs::File;
 
 const TOM:usize = 0x8000; // Top Of Memory, exclusive (mem: 0x0000-0x7FFF inclusive)
 const NUM_REG:usize = 8;
 
 // status reg
 // x = undefined
-// x x x OUT    MEMW MEMR M1 HLT?
+// x x IN OUT    MEMW MEMR M1 HLT?
+const IN_BIT:u16 = 8;      // IO event
 const OUT_BIT:u16 = 4;      // IO event
 const MEMW_BIT:u16 = 3;     // mem read
 const MEMR_BIT:u16 = 2;     // mem read
@@ -197,12 +199,22 @@ impl Machine {
             0x000C => self.and(),
             0x000D => self.or(),
             0x000E => self.not(),
-
+            0x000F => self.rmem(),
+            0x0010 => self.wmem(),
+            0x0011 => self.call(),
+            0x0012 => self.ret(),
             0x0013 => self.out(),
-
+            0x0014 => self.read_in(),
             0x0015 => self.nop(),       // `noop` 0d21
-            _ => panic!(UnknownOpcode)
+            _ => self.unknown(instruction),
         }
+    }
+
+    fn unknown(&mut self, instruction:u16) {
+        println!("\n****unknown opcode****\n(big-endian)");
+        println!("unknown instruction: {:#x}", instruction);
+        println!("pc: {:#x}\nmem[pc]: {:#x}\nmem[pc-1]: {:#x}", self.pc, swap_endian(self.mem[self.pc as usize]), swap_endian(self.mem[(self.pc -1) as usize]));
+        panic!(UnknownOpcode)
     }
 
     /**
@@ -394,6 +406,62 @@ impl Machine {
         self.poke(dest, value);
     }
 
+    /**
+     * read memory at address <b> and write it to a
+     */
+    fn rmem(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let source:u16 = self.peek_inc();
+        let value:u16 = self.peek(source);
+        self.poke(dest, value);
+    }
+
+    /**
+     * write immediate value b into memory at address <a>
+     */
+    fn wmem(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let value:u16 = self.peek_inc();
+        self.poke(dest, value);
+    }
+
+    /**
+     * write the address of the next instruction to the stack and jump to a
+     */
+    fn call(&mut self) {
+        self.stack.push(self.pc+1);
+        self.pc = self.peek_inc();
+    }
+
+    /**
+     * remove the top element from the stack and jump to it; empty stack = halt
+     */
+    fn ret(&mut self) {
+        let value:u16 = match self.stack.pop() {
+            Some(p) => p,
+            None => panic!(EmptyStack)
+        };
+        self.pc = value;
+    }
+
+    /**
+     * Read a character from the terminal and write its ascii code to a
+     * It can be assumed that once input starts, it will continue
+     * until a newline is encountered.
+     * This means that you can safely read whole lines from the keyboard
+     * and trust that they will be fully read
+     */
+    fn read_in(&mut self) {
+        let dest:u16 = self.peek_inc();
+        let stdin = io::stdin();
+        let mut input = String::new();
+        set_bit(&mut self.status, IN_BIT);
+        let string = std::io::stdin().read_line(&mut input).ok().expect("Failed to read line");
+        clear_bit(&mut self.status, IN_BIT);
+
+        let bytes = input.bytes().nth(0).expect("no byte read");
+        self.poke(dest, bytes as u16);
+    }
 
     /**
      * No operation is performed
@@ -403,6 +471,23 @@ impl Machine {
 }
 
 // see tests.rs
-fn main() {
+fn main() -> io::Result<()> {
+    let mut f = File::open("challenge.bin")?;
+
+    let mut buffer = Vec::new();
+    f.read_to_end(&mut buffer)?;
+
+    let mut m0 = Machine::new();
+    let mut val:u16 = 0;
+    let mut x:u16 = 0;
+    for n in (0..buffer.len()).step_by(2) {
+        val = (buffer[n] as u16) << 8;
+        val |= (buffer[n+1] as u16);
+        m0.mem[x as usize] = val;
+        x+=1;
+    }
+    m0.run();
+
+    Ok(())
 }
 
