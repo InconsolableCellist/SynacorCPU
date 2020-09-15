@@ -183,6 +183,7 @@ impl Machine {
      * panic occurs.
      */
     fn execute(&mut self, instruction:u16) {
+        // println!("execute: {:#x}", instruction);
         match instruction {
             0x0000 => self.halt(),      // `halt`
             0x0001 => self.set(),
@@ -299,6 +300,8 @@ impl Machine {
     fn jt(&mut self) {
         if self.peek_inc() != 0 {
             self.pc = self.peek_inc();
+        } else {
+            self.pc += 1;
         }
     }
 
@@ -308,6 +311,8 @@ impl Machine {
     fn jf(&mut self) {
         if self.peek_inc() == 0 {
             self.pc = self.peek_inc();
+        } else {
+            self.pc += 1;
         }
     }
 
