@@ -1,17 +1,19 @@
 mod tests;
 mod errors;
+mod display;
 
 use std::ops::{Index, IndexMut};
-use std::fmt;
-use std::io::{self, Write, BufRead, Read};
+use std::io::{self, Write, Read};
 use std::char;
-use core::mem;
-use crate::errors::Error::{MemoryInvalid, UnknownOpcode, EmptyStack};
-use std::process::id;
+use crate::errors::Error::{MemoryInvalid, UnknownOpcode, EmptyStack, FailedToReadLine};
 use std::fs::File;
+use std::num::Wrapping;
+use crate::display::frontpanelRun;
 
 const TOM:usize = 0x8000; // Top Of Memory, exclusive (mem: 0x0000-0x7FFF inclusive)
 const NUM_REG:usize = 8;
+const DEBUG:bool = false;
+
 
 // status reg
 // x = undefined
@@ -24,11 +26,11 @@ const M1_BIT:u16 = 1;       // M1 cycle
 const HALT_BIT:u16 = 0;
 
 fn set_bit(data:&mut u16, bit_position:u16) {
-    *data |= (1 << bit_position);
+    *data |= 1 << bit_position;
 }
 
 fn clear_bit(data:&mut u16, bit_position:u16) {
-    *data &= (0xFFFF ^ (1 << bit_position));
+    *data &= 0xFFFF ^ (1 << bit_position);
 }
 
 fn get_bit(data:&u16, bit_position:u16) -> bool {
@@ -48,13 +50,18 @@ fn swap_endian(ushort:u16) -> u16 {
     (ushort << 8) | (ushort >> 8)
 }
 
-struct Machine {
+pub struct Machine {
     mem:[u16; TOM],
     stack:Vec<u16>,
     registers:[u16; NUM_REG],
     pc:u16,
     status:u16,
+    executed:u32,
+    recentMemAccess:Vec<(u16, u8)>,  // contains: (memory cell that was read or written to, type of access). To be consumed and pruned by a visualization
 }
+const MAX_RECENTMEMACCESS_SIZE:u8 = 255; // prevents recentMemAccess from growing past this size
+const RECENTMEMACCESS_READ_BIT:u8 = 1;
+const RECENTMEMACCESS_WRITE_BIT:u8 = 2;
 
 impl Index<u16> for Machine {
     type Output = u16;
@@ -62,6 +69,7 @@ impl Index<u16> for Machine {
         if addr < (TOM as u16) {
             &self.mem[addr as usize]
         } else {
+            self.dump();
             panic!(MemoryInvalid);
         }
     }
@@ -85,6 +93,8 @@ impl Machine {
             pc: 0,
             mem:[0; TOM],
             status: 0,
+            executed: 0,
+            recentMemAccess: Vec::new(),
         }
     }
 
@@ -96,11 +106,14 @@ impl Machine {
      */
     fn peek_inc(&mut self) -> u16 {
         set_bit(&mut self.status, MEMR_BIT);
-        let mut val:u16 = self.mem[self.pc as usize];
-        clear_bit(&mut self.status, MEMR_BIT);
+        //println!("pc: {:#X}", self.pc);
+        let val:u16 = self.mem[self.pc as usize];
 
         self.pc += 1;
 
+        if self.recentMemAccess.len() < MAX_RECENTMEMACCESS_SIZE as usize {
+            self.recentMemAccess.push((self.pc, RECENTMEMACCESS_READ_BIT));
+        }
         return swap_endian(val);
     }
 
@@ -116,12 +129,15 @@ impl Machine {
         let mut val:u16 = 0;
         if dest_addr < TOM as u16 {
             val = self.mem[dest_addr as usize];
-        } else if dest_addr < (TOM+8) as u16 {
+        } else if dest_addr < (TOM+NUM_REG) as u16 {
             val = self.registers[(dest_addr % (TOM as u16)) as usize];
         } else {
             panic!(MemoryInvalid);
         }
-        clear_bit(&mut self.status, MEMR_BIT);
+
+        if self.recentMemAccess.len() < MAX_RECENTMEMACCESS_SIZE as usize {
+            self.recentMemAccess.push((dest_addr, RECENTMEMACCESS_READ_BIT));
+        }
 
         return swap_endian(val);
     }
@@ -144,7 +160,19 @@ impl Machine {
         } else {
             panic!(MemoryInvalid);
         }
+
+        if self.recentMemAccess.len() < MAX_RECENTMEMACCESS_SIZE as usize {
+            self.recentMemAccess.push((dest_addr, RECENTMEMACCESS_WRITE_BIT));
+        }
+    }
+
+    fn reset_status(&mut self) {
+        clear_bit(&mut self.status, M1_BIT);
+        clear_bit(&mut self.status, MEMR_BIT);
         clear_bit(&mut self.status, MEMW_BIT);
+        clear_bit(&mut self.status, IN_BIT);
+        clear_bit(&mut self.status, OUT_BIT);
+        clear_bit(&mut self.status, HALT_BIT);
     }
 
     /**
@@ -153,10 +181,11 @@ impl Machine {
      */
     pub fn fetch_and_execute(&mut self) {
         if !self.is_halted() {
+            self.reset_status();
             set_bit(&mut self.status, M1_BIT);
             let instruction:u16 = self.peek_inc();
-            clear_bit(&mut self.status, M1_BIT);
-            
+            //clear_bit(&mut self.status, M1_BIT);
+
             self.execute(instruction);
         }
     }
@@ -183,17 +212,19 @@ impl Machine {
      * panic occurs.
      */
     fn execute(&mut self, instruction:u16) {
-        // println!("execute: {:#x}", instruction);
+        if DEBUG { println!(" opcode: {:#X} pc: {:#X} (offset {:#X}) step: {} ", instruction, self.pc, self.pc * 2, self.executed); }
+        io::stdout().flush().unwrap();
+        self.executed += 1;
         match instruction {
             0x0000 => self.halt(),      // `halt`
             0x0001 => self.set(),
             0x0002 => self.push(),
             0x0003 => self.pop(),
-            0x0004 => self.eq(),
+            0x0004 => self.eq(),  // a to 1 if b =0 c, 0 otherwise
             0x0005 => self.gt(),
             0x0006 => self.jmp(),
-            0x0007 => self.jt(),
-            0x0008 => self.jf(),
+            0x0007 => self.jt(), // jmp if a != 0
+            0x0008 => self.jf(), // jmp if a == 0
             0x0009 => self.add(),
             0x000A => self.mult(),
             0x000B => self.modulo(),
@@ -206,16 +237,57 @@ impl Machine {
             0x0012 => self.ret(),
             0x0013 => self.out(),
             0x0014 => self.read_in(),
-            0x0015 => self.nop(),       // `noop` 0d21
+            0x0015 => self.nop(),       // `noop` 0d2
             _ => self.unknown(instruction),
         }
     }
 
     fn unknown(&mut self, instruction:u16) {
-        println!("\n****unknown opcode****\n(big-endian)");
-        println!("unknown instruction: {:#x}", instruction);
-        println!("pc: {:#x}\nmem[pc]: {:#x}\nmem[pc-1]: {:#x}", self.pc, swap_endian(self.mem[self.pc as usize]), swap_endian(self.mem[(self.pc -1) as usize]));
+        self.dump();
+        println!("\n**** unknown opcode ****\n(big-endian)");
+        println!("unknown instruction: {:#X}", instruction);
         panic!(UnknownOpcode)
+    }
+
+    fn dump(&self) {
+        println!("\n**** dump ****\n(big-endian)");
+        println!("status: {:#b}", self.status);
+        println!("pc: {:#X}\nmem[pc]: {:#X}\n", self.pc, swap_endian(self.mem[self.pc as usize]));
+        println!("(file offset {:#X})", self.pc * 2);
+        /*
+        for x in (0..self.mem.len()) {
+            if x % 8 == 0 {
+                println!("");
+                print!("0000:{:04X}", x);
+            }
+            print!(" {:04X}", self.mem[x]);
+        }
+        */
+        let mut val:u8;
+        for x in (0..self.mem.len()).step_by(8) {
+            print!("0000:{:04X}", x);
+            for y in x..x+8 {
+                print!(" {:04X}", self.mem[y]);
+            }
+            print!(" ");
+
+            for y in x..x+8 {
+                val = (self.mem[y] >> 8) as u8;
+                if val >= 0x20 && val <= 0x7E {
+                    print!("{}", val as char);
+                } else {
+                    print!(".");
+                }
+
+                val = (self.mem[y] | 0x00FF) as u8;
+                if val >= 0x20 && val <= 0x7E {
+                    print!("{}", val as char);
+                } else {
+                    print!(".");
+                }
+            }
+            println!("");
+        }
     }
 
     /**
@@ -230,17 +302,24 @@ impl Machine {
      */
     fn set(&mut self) {
         let dest:u16 = self.peek_inc();
-        let value:u16 = self.peek_inc();
+        let mut val:u16 = self.peek_inc();
 
-        self.poke(dest, value);
+        if val >= TOM as u16 {
+            val = self.peek(val);
+        }
+
+        self.poke(dest, val);
     }
 
     /**
      * Pushes immediate value a onto the stack
      */
     fn push(&mut self) {
-        let value:u16 = self.peek_inc();
-        self.stack.push(value);
+        let mut val:u16 = self.peek_inc();
+        if val >= TOM as u16 {
+            val = self.peek(val);
+        }
+        self.stack.push(val);
     }
    
 
@@ -262,8 +341,16 @@ impl Machine {
      */
     fn eq(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
-        let c:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
+        }
 
         if b == c {
             self.poke(dest, 1);
@@ -277,8 +364,16 @@ impl Machine {
      */
     fn gt(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
-        let c:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
+        }
 
         if b > c {
             self.poke(dest, 1);
@@ -292,16 +387,24 @@ impl Machine {
      */
     fn jmp(&mut self) {
         self.pc = self.peek_inc();
+        if DEBUG { print!(" (jmp {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
     }
 
     /**
      * if a is nonzero jump to b
      */
     fn jt(&mut self) {
-        if self.peek_inc() != 0 {
-            self.pc = self.peek_inc();
-        } else {
-            self.pc += 1;
+        let mut val = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if val >= TOM as u16 {
+            val = self.peek(val);
+        }
+
+        let dest = self.peek_inc();
+        if val != 0 {
+            self.pc = dest;
+            if DEBUG { print!(" (jt {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -309,10 +412,17 @@ impl Machine {
      * if a is 0 jump to b
      */
     fn jf(&mut self) {
-        if self.peek_inc() == 0 {
-            self.pc = self.peek_inc();
-        } else {
-            self.pc += 1;
+        let mut val = self.peek_inc();
+        let dest = self.peek_inc();
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if val >= TOM as u16 {
+            val = self.peek(val);
+        }
+
+        if val == 0 {
+            self.pc = dest;
+            if DEBUG { print!(" (jf {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -321,15 +431,19 @@ impl Machine {
      */
     fn add(&mut self) {
         let dest:u16 = self.peek_inc();
-        let mut sum:u16 = self.peek_inc();
+        let mut a:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
 
         // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
-        if sum >= TOM as u16 {
-            sum = self.peek(sum);
+        if a >= TOM as u16 {
+            a = self.peek(a);
+        }
+        if b >= TOM as u16 {
+            b = self.peek(b);
         }
 
-        sum += self.peek_inc();
-        sum %= TOM as u16;
+        //let sum:u16 = a.wrapping_add(b) % TOM as u16;
+        let sum:u16 = a.wrapping_add(b) % TOM as u16;
 
         self.poke(dest, sum);
     }
@@ -339,17 +453,21 @@ impl Machine {
      */
     fn mult(&mut self) {
         let dest:u16 = self.peek_inc();
-        let mut product:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
 
         // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
-        if product >= TOM as u16 {
-            product = self.peek(product);
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
         }
 
-        product *= self.peek_inc();
-        product %= TOM as u16;
+        if DEBUG { println!("b: {:#X} c: {:#X}", b, c); }
+        b = b.wrapping_mul(c) % TOM as u16;
 
-        self.poke(dest, product)
+        self.poke(dest, b)
     }
 
     /**
@@ -366,7 +484,7 @@ impl Machine {
         set_bit(&mut self.status, OUT_BIT);
         print!("{}", (val as u8) as char);
         io::stdout().flush().unwrap();
-        clear_bit(&mut self.status, OUT_BIT);
+        //clear_bit(&mut self.status, OUT_BIT);
     }
 
     /**
@@ -374,8 +492,21 @@ impl Machine {
      */
     fn modulo(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
-        let c:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
+
+        if DEBUG { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+
+        // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
+        }
+
+        if DEBUG { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+
         self.poke(dest, b%c);
     }
 
@@ -384,8 +515,16 @@ impl Machine {
      */
     fn and(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
-        let c:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
+
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
+        }
+
         let value:u16 = (b&c) % TOM as u16;
         self.poke(dest, value);
     }
@@ -395,8 +534,16 @@ impl Machine {
      */
     fn or(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
-        let c:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        let mut c:u16 = self.peek_inc();
+
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
+        if c >= TOM as u16 {
+            c = self.peek(c);
+        }
+
         let value:u16 = (b|c) % TOM as u16;
         self.poke(dest, value);
     }
@@ -406,27 +553,49 @@ impl Machine {
      */
     fn not(&mut self) {
         let dest:u16 = self.peek_inc();
-        let b:u16 = self.peek_inc();
+        let mut b:u16 = self.peek_inc();
+        if b >= TOM as u16 {
+            b = self.peek(b);
+        }
         let value:u16 = (!b) % TOM as u16;
         self.poke(dest, value);
     }
 
     /**
-     * read memory at address <b> and write it to a
+     * read memory at address <b> and write it to address in <a>
      */
     fn rmem(&mut self) {
         let dest:u16 = self.peek_inc();
-        let source:u16 = self.peek_inc();
-        let value:u16 = self.peek(source);
+        let mut source:u16 = self.peek_inc();
+
+        if source >= TOM as u16 {
+            source = self.peek(source);
+        }
+        let mut value:u16 = self.peek(source);
+
+        if value >= TOM as u16 {
+            value = self.peek(value);
+        }
+        if DEBUG { println!("storing into {:#X} the value contained in {:#X}, which is {:#X}", dest, source, value); }
+
         self.poke(dest, value);
     }
 
     /**
-     * write immediate value b into memory at address <a>
+     * write value contained in <b> into memory at address <a>
      */
     fn wmem(&mut self) {
-        let dest:u16 = self.peek_inc();
-        let value:u16 = self.peek_inc();
+        let mut dest:u16 = self.peek_inc();
+        let mut value:u16 = self.peek_inc();
+
+        if dest >= TOM as u16 {
+            dest = self.peek(dest);
+        }
+        if value >= TOM as u16 {
+            value = self.peek(value);
+        }
+        if DEBUG { println!("writing mem location {:#X} with the value {:#X}", dest, value); }
+
         self.poke(dest, value);
     }
 
@@ -434,8 +603,12 @@ impl Machine {
      * write the address of the next instruction to the stack and jump to a
      */
     fn call(&mut self) {
-        self.stack.push(self.pc+1);
-        self.pc = self.peek_inc();
+        let mut dest:u16 = self.peek_inc();
+        self.stack.push(self.pc);
+        if dest >= TOM as u16 {
+            dest = self.peek(dest);
+        }
+        self.pc = dest;
     }
 
     /**
@@ -458,11 +631,10 @@ impl Machine {
      */
     fn read_in(&mut self) {
         let dest:u16 = self.peek_inc();
-        let stdin = io::stdin();
         let mut input = String::new();
         set_bit(&mut self.status, IN_BIT);
-        let string = std::io::stdin().read_line(&mut input).ok().expect("Failed to read line");
-        clear_bit(&mut self.status, IN_BIT);
+        std::io::stdin().read_line(&mut input).ok().expect(&FailedToReadLine.to_string());
+        //clear_bit(&mut self.status, IN_BIT);
 
         let bytes = input.bytes().nth(0).expect("no byte read");
         self.poke(dest, bytes as u16);
@@ -487,11 +659,14 @@ fn main() -> io::Result<()> {
     let mut x:u16 = 0;
     for n in (0..buffer.len()).step_by(2) {
         val = (buffer[n] as u16) << 8;
-        val |= (buffer[n+1] as u16);
+        val |= buffer[n+1] as u16;
         m0.mem[x as usize] = val;
         x+=1;
     }
-    m0.run();
+
+    frontpanelRun(&mut m0);
+
+    // m0.run();
 
     Ok(())
 }

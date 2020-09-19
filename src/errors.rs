@@ -5,6 +5,7 @@ pub enum Error {
     MemoryInvalid,
     UnknownOpcode,
     EmptyStack,
+    FailedToReadLine,
 }
 
 impl fmt::Display for Error {

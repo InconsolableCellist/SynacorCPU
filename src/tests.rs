@@ -139,34 +139,35 @@ mod tests {
 
     #[test]
     fn test_push() {
-        let prog:[u16; 5] = [ 0x0200, 0x00AA, 0x0200, 0xFF00, 0x0000 ];
-        //                      PUSH  0xAA00    PUSH  0x00FF    HALT
+        let prog:[u16; 8] = [ 0x0200, 0xAA00, 0x0200, 0xFF00, 0x0100, 0x0080, 0xCC00, 0x0000 ];
+        //                      PUSH  0x00AA    PUSH  0x00FF     SET       a  0x00CC    HALT
         let mut m0 = Machine::new();
-        for n in 0..5 {
+        for n in 0..8 {
             m0.mem[n] = prog[n];
         }
         m0.run();
-        assert_eq!(m0.stack[0], 0xAA00);
+        assert_eq!(m0.stack[0], 0x00AA);
         assert_eq!(m0.stack[1], 0x00FF);
+        assert_eq!(m0.peek(0x8000), 0x00CC);
     }
 
     #[test]
     fn test_push_pop() {
-        let prog:[u16; 9] = [ 0x0200, 0x00AA, 0x0200, 0xFF00, 0x0300, 0x0080, 0x0300, 0x0001, 0x0000 ];
-        //                      PUSH  0xAA00    PUSH  0x00FF     POP  0x8000     POP  0x0100    HALT
+        let prog:[u16; 9] = [ 0x0200, 0xAA00, 0x0200, 0xFF00, 0x0300, 0x0080, 0x0300, 0x0001, 0x0000 ];
+        //                      PUSH  0x00AA    PUSH  0x00FF     POP  0x8000     POP  0x0100    HALT
         let mut m0 = Machine::new();
         for n in 0..9 {
             m0.mem[n] = prog[n];
         }
         m0.run();
         assert_eq!(m0.peek(0x8000), 0x00FF);
-        assert_eq!(m0.peek(0x0100), 0xAA00);
+        assert_eq!(m0.peek(0x0100), 0x00AA);
     }
 
     #[test]
     fn test_eq() {
-        let prog:[u16; 12] = [ 0x0100, 0x0080, 0xFFFF, 0x0400, 0x0001, 0xAAAA, 0xAAAA, 0x0400, 0x0080, 0xAAAA, 0xAAAB, 0x0000 ];
-        //                       SET       A   0xFFFF      EQ  0x0100  0xAAAA  0xAAAA      EQ       A  0xAAAA  0xABAA,   HALT
+        let prog:[u16; 12] = [ 0x0100, 0x0080, 0xFF00, 0x0400, 0x0001, 0xAA00, 0xAA00, 0x0400, 0x0080, 0xAA00, 0xAB00, 0x0000 ];
+        //                       SET       A   0x00FF      EQ  0x0100  0x00AA  0x00AA      EQ       A  0x00AA  0x00AB,   HALT
         let mut m0 = Machine::new();
         for n in 0..12 {
             m0.mem[n] = prog[n];
@@ -203,26 +204,28 @@ mod tests {
 
     #[test]
     fn test_jt() {
-        let prog:[u16; 7] = [ 0x0700, 0x0100, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0000 ];
-        //                        JT  0x0001  0x0006     SET       a  0xFFFF    HALT
+        let prog:[u16; 13] = [ 0x0700, 0x0100, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0700, 0x0000, 0x0C00, 0x0100, 0x0180, 0xFFFF, 0x0000 ];
+        //                        JT  0x0001  0x0006     SET       a  0xFFFF      JT  0x0000   0x000C     SET       b  0xFFFF    HALT
         let mut m0 = Machine::new();
-        for n in 0..7 {
+        for n in 0..13 {
             m0.mem[n] = prog[n];
         }
         m0.run();
         assert_eq!(m0.peek(0x8000), 0x0000);
+        assert_eq!(m0.peek(0x8001), 0xFFFF);
     }
 
     #[test]
     fn test_jf() {
-        let prog:[u16; 7] = [ 0x0800, 0x0000, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0000 ];
-        //                        JF  0x0000  0x0006     SET       a  0xFFFF    HALT
+        let prog:[u16; 13] = [ 0x0800, 0x0000, 0x0600, 0x0100, 0x0080, 0xFFFF, 0x0800, 0x0100, 0x0C00, 0x0100, 0x0180, 0xFFFF, 0x0000 ];
+        //                        JF  0x0000  0x0006     SET       a  0xFFFF       JF  0x0001  0x000C     SET       b  0xFFFF    HALT
         let mut m0 = Machine::new();
-        for n in 0..7 {
+        for n in 0..13 {
             m0.mem[n] = prog[n];
         }
         m0.run();
         assert_eq!(m0.peek(0x8000), 0x0000);
+        assert_eq!(m0.peek(0x8001), 0xFFFF);
     }
 
     #[test]
