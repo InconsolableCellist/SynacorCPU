@@ -633,11 +633,14 @@ impl Machine {
         let dest:u16 = self.peek_inc();
         let mut input = String::new();
         set_bit(&mut self.status, IN_BIT);
-        std::io::stdin().read_line(&mut input).ok().expect(&FailedToReadLine.to_string());
+        //std::io::stdin().read_line(&mut input).ok().expect(&FailedToReadLine.to_string());
         //clear_bit(&mut self.status, IN_BIT);
 
-        let bytes = input.bytes().nth(0).expect("no byte read");
-        self.poke(dest, bytes as u16);
+        let in_char:u8 = std::io::stdin().bytes().nth(0).expect("no byte read").unwrap();
+        if in_char == '.' as u8  {
+            self.hypervisor_input_handler();
+        }
+        self.poke(dest, in_char as u16);
     }
 
     /**
@@ -645,7 +648,13 @@ impl Machine {
      */
     fn nop(&self) {
     }
+
+    fn hypervisor_input_handler(&mut self) {
+        println!("\nSYNACOR HYPERVISOR");
+    }
 }
+
+
 
 // see tests.rs
 fn main() -> io::Result<()> {

@@ -4,7 +4,7 @@ use self::sdl2::pixels::Color;
 use std::time::Duration;
 use self::sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use crate::{Machine, get_bit, RECENTMEMACCESS_READ_BIT, RECENTMEMACCESS_WRITE_BIT, TOM, HALT_BIT, clear_bit};
+use crate::{Machine, get_bit, RECENTMEMACCESS_READ_BIT, RECENTMEMACCESS_WRITE_BIT, TOM, HALT_BIT, clear_bit, swap_endian};
 use self::sdl2::rect::{Point, Rect};
 use self::sdl2::render::{TextureCreator, Canvas, Texture, CanvasBuilder};
 use self::sdl2::video::{WindowContext, Window};
@@ -13,7 +13,7 @@ pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
 
-    let window = video_subsystem.window("synacor VM frontpanel", 3048, 2048)
+    let window = video_subsystem.window("synacor VM frontpanel", 2550, 1600)
         .position_centered()
         .opengl()
         .build()
@@ -89,7 +89,7 @@ pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
 
         if x % speed == 0 {
             canvas.present();
-            draw_empty_cells(TOM as u16, &mut canvas);
+            draw_empty_cells(TOM as u16, &mut canvas, &m0);
         }
         for access_location in m0.recentMemAccess.iter() {
             if access_location.1 == RECENTMEMACCESS_READ_BIT {
@@ -109,13 +109,22 @@ pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
     Ok(())
 }
 
-fn draw_empty_cells(up_to:u16, canvas:&mut Canvas<Window>) {
+fn draw_empty_cells(up_to:u16, canvas:&mut Canvas<Window>, machine:&Machine) {
     const y_offset:i32 = 20;
     const rect_width:u32 = 40;
     const rect_height:u32 = 3;
     canvas.set_draw_color(Color::RGB(128, 128, 128));
     for y in 0..(TOM as i32) / 64 {
         for x in 0..64 {
+            let val:u16 = swap_endian(machine.mem[((y*64)+x) as usize]);
+            // let val:u16 = machine.mem[((y*64)+x) as usize];
+
+            if val > 0x001F && val < 0x007F {
+                canvas.set_draw_color(Color::RGB(0, 0, (val % 255) as u8));
+            } else {
+                canvas.set_draw_color(Color::RGB((val / 255) as u8, (val / 255) as u8,(val / 255) as u8));
+            }
+            // canvas.set_draw_color(Color::RGB((machine.mem[(y*x) as usize] >> 8) as u8, 0, 0));
             canvas.fill_rect(Rect::new(x * rect_width as i32, (y * rect_height as i32) + y_offset, rect_width, rect_height));
         }
     }
