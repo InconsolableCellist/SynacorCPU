@@ -1,23 +1,25 @@
-fn disassemble(&mut Machine) {
+use crate::machine::Machine;
+
+pub fn disassemble(m0:&mut Machine) {
     println!("disassemble");
 }
 
-fn save_state(&mut Machine) {
+pub fn save_state(m0:&mut Machine) {
     println!("saving state");
 }
 
-fn load_state(&mut Machine) {
+pub fn load_state(m0:&mut Machine) {
     println!("loading state");
 }
 
-fn print_regs(&mut Machine) {
+pub fn print_regs(m0:&mut Machine) {
     println!("printing registers");
 }
 
-fn goto_and_run(&mut Machine) {
+pub fn goto_and_run(m0:&mut Machine) {
     println!("goto and run");
 }
 
-fn examine_memory(&mut Machine) {
+pub fn examine_memory(m0:&mut Machine) {
     println!("examine memory");
 }

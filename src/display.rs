@@ -4,10 +4,10 @@ use self::sdl2::pixels::Color;
 use std::time::Duration;
 use self::sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use crate::{Machine, get_bit, RECENTMEMACCESS_READ_BIT, RECENTMEMACCESS_WRITE_BIT, TOM, HALT_BIT, clear_bit, swap_endian};
 use self::sdl2::rect::{Point, Rect};
 use self::sdl2::render::{TextureCreator, Canvas, Texture, CanvasBuilder};
 use self::sdl2::video::{WindowContext, Window};
+use synacor_cpu::{utils, constants::*, Machine};
 
 pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
     let sdl_context = sdl2::init()?;
@@ -67,7 +67,7 @@ pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
                 },
                 Event::KeyDown { keycode: Some(Keycode::Space), .. } => {
                     if m0.is_halted() {
-                        clear_bit(&mut m0.status, HALT_BIT);
+                        utils::clear_bit(&mut m0.status, HALT_BIT);
                     } else {
                         m0.halt();
                         m0.dump();
@@ -79,7 +79,7 @@ pub fn frontpanelRun(m0:&mut Machine) -> Result<(), String> {
 
         //::std::thread::sleep(Duration::new(0, 1_100_100_100u32 /30));
         for i in 0..16 {
-            if get_bit(&m0.status, i) {
+            if utils::get_bit(&m0.status, i) {
                 canvas.set_draw_color(Color::RGB(255, 0, 0));
             } else {
                 canvas.set_draw_color(Color::RGB(0, 0, 255));
@@ -116,7 +116,7 @@ fn draw_empty_cells(up_to:u16, canvas:&mut Canvas<Window>, machine:&Machine) {
     canvas.set_draw_color(Color::RGB(128, 128, 128));
     for y in 0..(TOM as i32) / 64 {
         for x in 0..64 {
-            let val:u16 = swap_endian(machine.mem[((y*64)+x) as usize]);
+            let val:u16 = utils::swap_endian(machine.mem[((y*64)+x) as usize]);
             // let val:u16 = machine.mem[((y*64)+x) as usize];
 
             if val > 0x001F && val < 0x007F {
