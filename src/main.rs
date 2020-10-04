@@ -633,24 +633,49 @@ impl Machine {
         let dest:u16 = self.peek_inc();
         let mut input = String::new();
         set_bit(&mut self.status, IN_BIT);
-        //std::io::stdin().read_line(&mut input).ok().expect(&FailedToReadLine.to_string());
-        //clear_bit(&mut self.status, IN_BIT);
 
         let in_char:u8 = std::io::stdin().bytes().nth(0).expect("no byte read").unwrap();
         if in_char == '.' as u8  {
+            // TODO: entering and exiting hypervisor control still passes some input to the guest. Prevent this
             self.hypervisor_input_handler();
         }
         self.poke(dest, in_char as u16);
     }
 
-    /**
-     * No operation is performed
-     */
-    fn nop(&self) {
-    }
+    fn nop(&self) { }
 
     fn hypervisor_input_handler(&mut self) {
-        println!("\nSYNACOR HYPERVISOR");
+        println!("\n\n***\nSynacor hypervisor control program\nh - help\n");
+        loop {
+            io::stdout().flush().unwrap();
+
+            // TODO: stop reading after getting a command. E.g., 'sl' will both save and load. It should save only, or be invalid
+            match std::io::stdin().bytes().nth(0).expect("no byte read").unwrap() as char {
+                'd' => self.disassemble(),
+                's' => self.save_state(),
+                'l' => self.load_state(),
+                'p' => self.print_regs(),
+                'g' => self.goto_and_run(),
+                'x' => self.examine_memory(),
+                'r' => { println!("returning execution to guest...\n***\n\n"); break; },
+                '\n' => {},
+                _ => println!("{}", {
+                    "h - Help\n\
+                     d - Disassemble: d SSSS EEEE\n\
+                     s - Save state\n\
+                     l - Load state\n\
+                     p - Print registers\n\
+                     g - Goto and run: g NNNN\n\
+                     x - eXamine memory: x SSSS EEEE\n\
+                     r - Return to guest\n\
+                     \n\
+                     NNNN memory location in hex\n\
+                     SSSS start memory location in hex\n\
+                     EEEE end memory location in hex\n\
+                     "
+                    }),
+            }
+        }
     }
 }
 
@@ -673,9 +698,9 @@ fn main() -> io::Result<()> {
         x+=1;
     }
 
-    frontpanelRun(&mut m0);
+    // frontpanelRun(&mut m0);
 
-    // m0.run();
+    m0.run();
 
     Ok(())
 }
