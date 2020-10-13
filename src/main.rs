@@ -11,6 +11,7 @@ use std::num::Wrapping;
 use crate::display::frontpanelRun;
 use synacor_cpu::Machine;
 
+
 // see tests.rs
 fn main() -> io::Result<()> {
     let mut f = File::open("challenge.bin")?;
@@ -24,7 +25,7 @@ fn main() -> io::Result<()> {
     for n in (0..buffer.len()).step_by(2) {
         val = (buffer[n] as u16) << 8;
         val |= buffer[n+1] as u16;
-        m0.mem[x as usize] = val;
+        m0.mem.push(val);
         x+=1;
     }
 

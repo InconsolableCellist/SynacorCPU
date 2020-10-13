@@ -1,6 +1,5 @@
 pub const TOM:usize = 0x8000; // Top Of Memory, exclusive (mem: 0x0000-0x7FFF inclusive)
 pub const NUM_REG:usize = 8;
-pub const DEBUG:bool = false;
 
 // status reg
 // x = undefined

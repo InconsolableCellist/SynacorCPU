@@ -5,17 +5,32 @@ use crate::errors::Error;
 use std::io::{Read, Write};
 use crate::hypervisor_controller as hc;
 use crate::utils::*;
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 
 
+#[derive(Serialize, Deserialize)]
 pub struct Machine {
-    pub mem:[u16; TOM],
+    pub mem:Vec<u16>,
     stack:Vec<u16>,
     registers:[u16; NUM_REG],
     pc:u16,
     pub status:u16,
     executed:u32,
     pub recentMemAccess:Vec<(u16, u8)>,  // contains: (memory cell that was read or written to, type of access). To be consumed and pruned by a visualization
+    pub debug:bool,
 }
+
+/*
+fn serialize_mem<S>(array: &[u16; TOM], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+        array.serialize(serializer)
+}
+
+fn deserialize_mem<S>(array: &[u16; TOM], serializer: S) -> Result<S::Ok, S::Error>
+    where S: Serializer {
+    array.deserialize(serializer)
+}
+*/
 
 impl Index<u16> for Machine {
     type Output = u16;
@@ -46,10 +61,11 @@ impl Machine {
             stack: Vec::new(),
             registers: [0; NUM_REG],
             pc: 0,
-            mem:[0; TOM],
+            mem: Vec::with_capacity(TOM),
             status: 0,
             executed: 0,
             recentMemAccess: Vec::new(),
+            debug: false,
         }
     }
 
@@ -167,7 +183,7 @@ impl Machine {
      * panic occurs.
      */
     fn execute(&mut self, instruction:u16) {
-        if DEBUG { println!(" opcode: {:#X} pc: {:#X} (offset {:#X}) step: {} ", instruction, self.pc, self.pc * 2, self.executed); }
+        if self.debug { println!(" opcode: {:#X} pc: {:#X} (offset {:#X}) step: {} ", instruction, self.pc, self.pc * 2, self.executed); }
         io::stdout().flush().unwrap();
         self.executed += 1;
         match instruction {
@@ -334,7 +350,7 @@ impl Machine {
      */
     fn jmp(&mut self) {
         self.pc = self.peek_inc();
-        if DEBUG { print!(" (jmp {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+        if self.debug { print!(" (jmp {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
     }
 
     /**
@@ -351,7 +367,7 @@ impl Machine {
         let dest = self.peek_inc();
         if val != 0 {
             self.pc = dest;
-            if DEBUG { print!(" (jt {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+            if self.debug { print!(" (jt {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -369,7 +385,7 @@ impl Machine {
 
         if val == 0 {
             self.pc = dest;
-            if DEBUG { print!(" (jf {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+            if self.debug { print!(" (jf {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -411,7 +427,7 @@ impl Machine {
             c = self.peek(c);
         }
 
-        if DEBUG { println!("b: {:#X} c: {:#X}", b, c); }
+        if self.debug { println!("b: {:#X} c: {:#X}", b, c); }
         b = b.wrapping_mul(c) % TOM as u16;
 
         self.poke(dest, b)
@@ -442,7 +458,7 @@ impl Machine {
         let mut b:u16 = self.peek_inc();
         let mut c:u16 = self.peek_inc();
 
-        if DEBUG { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+        if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
 
         // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
         if b >= TOM as u16 {
@@ -452,7 +468,7 @@ impl Machine {
             c = self.peek(c);
         }
 
-        if DEBUG { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+        if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
 
         self.poke(dest, b%c);
     }
@@ -523,7 +539,7 @@ impl Machine {
         if value >= TOM as u16 {
             value = self.peek(value);
         }
-        if DEBUG { println!("storing into {:#X} the value contained in {:#X}, which is {:#X}", dest, source, value); }
+        if self.debug { println!("storing into {:#X} the value contained in {:#X}, which is {:#X}", dest, source, value); }
 
         self.poke(dest, value);
     }
@@ -541,7 +557,7 @@ impl Machine {
         if value >= TOM as u16 {
             value = self.peek(value);
         }
-        if DEBUG { println!("writing mem location {:#X} with the value {:#X}", dest, value); }
+        if self.debug { println!("writing mem location {:#X} with the value {:#X}", dest, value); }
 
         self.poke(dest, value);
     }
@@ -599,6 +615,7 @@ impl Machine {
             // TODO: stop reading after getting a command. E.g., 'sl' will both save and load. It should save only, or be invalid
             match std::io::stdin().bytes().nth(0).expect("no byte read").unwrap() as char {
                 'd' => hc::disassemble(self),
+                'D' => hc::toggle_debug(self),
                 's' => hc::save_state(self),
                 'l' => hc::load_state(self),
                 'p' => hc::print_regs(self),
@@ -609,6 +626,7 @@ impl Machine {
                 _ => println!("{}", {
                     "h - Help\n\
                      d - Disassemble: d SSSS EEEE\n\
+                     D - toggle debug output\n\
                      s - Save state\n\
                      l - Load state\n\
                      p - Print registers\n\
