@@ -6,6 +6,32 @@ use std::io::{Read, Write};
 use std::str::Split;
 use crate::constants::TOM;
 
+pub fn write_memory(m0:&mut Machine) {
+    println!("write memory");
+
+    let mut buffer:String = String::new();
+    std::io::stdin().read_line(&mut buffer).unwrap();
+    buffer.pop(); // remove \n
+    let tokens:Vec<&str> = buffer.split(" ").collect();
+    if tokens.len() < 3 {
+        println!("Usage: w NNNN v
+        NNNN - memory location in HEX
+        v - value in HEX");
+    } else {
+        io::stdout().flush().unwrap();
+
+        let loc:u16 = i64::from_str_radix(tokens[1], 16).unwrap() as u16;
+        let val:u16 = i64::from_str_radix(tokens[2], 16).unwrap() as u16;
+        if (loc <= TOM as u16) {
+            m0.mem[loc as usize] = swap_endian(val);
+        } else {
+            println!("Invalid params");
+        }
+    }
+
+}
+
+
 pub fn disassemble(m0:&mut Machine) {
     println!("disassemble");
 
@@ -22,7 +48,7 @@ pub fn disassemble(m0:&mut Machine) {
 
         let start:u16 = i64::from_str_radix(tokens[1], 16).unwrap() as u16;
         let end:u16 = i64::from_str_radix(tokens[2], 16).unwrap() as u16;
-        if (start < end) && (end < TOM as u16) {
+        if (start <= end) && (end <= TOM as u16) {
             disassemble_range(m0, start, end);
         } else {
             println!("Invalid params");
@@ -30,9 +56,9 @@ pub fn disassemble(m0:&mut Machine) {
     }
 }
 
-fn disassemble_range(m0:&Machine, start:u16, end:u16) {
+pub fn disassemble_range(m0:&Machine, start:u16, end:u16) {
     let mut addr:u16 = start;
-    while addr < end {
+    while addr <= end {
         let opcode:u16 = swap_endian(m0.mem[addr as usize]);
         let a1:u16 = swap_endian(m0.mem[(addr+1) as usize]);
         let a2:u16 = swap_endian(m0.mem[(addr+2) as usize]);
@@ -53,7 +79,7 @@ fn disassemble_range(m0:&Machine, start:u16, end:u16) {
             0x000B => { println!("{:#06X}:\tmod\t\t{:#06X}\t{:#06X}\t{:#06X}", addr, a1, a2, a3);     addr += 4 },
             0x000C => { println!("{:#06X}:\tand\t\t{:#06X}\t{:#06X}\t{:#06X}", addr, a1, a2, a3);     addr += 4 },
             0x000D => { println!("{:#06X}:\tor\t\t{:#06X}\t{:#06X}\t{:#06X}", addr, a1, a2, a3);      addr += 4 },
-            0x000E => { println!("{:#06X}:\tnot\t\t{:#06X}\t{:#06X}\t{:#06X}", addr, a1, a2, a3);     addr += 4 },
+            0x000E => { println!("{:#06X}:\tnot\t\t{:#06X}\t{:#06X}", addr, a1, a2);     addr += 3 },
             0x000F => { println!("{:#06X}:\trmem\t{:#06X}\t{:#06X}", addr, a1, a2);     addr += 3 },
             0x0010 => { println!("{:#06X}:\twmem\t{:#06X}\t{:#06X}", addr, a1, a2);     addr += 3 },
             0x0011 => { println!("{:#06X}:\tcall\t{:#06X}", addr, a1);      addr += 2 },
@@ -61,7 +87,7 @@ fn disassemble_range(m0:&Machine, start:u16, end:u16) {
             0x0013 => { println!("{:#06X}:\tout\t\t{:#06X}", addr, a1);     addr += 2 },
             0x0014 => { println!("{:#06X}:\tin\t\t{:#06X}", addr, a1);      addr += 2 },
             0x0015 => { println!("{:#06X}:\tnop", addr);                    addr += 1; },
-             _ => { println!("{:#06X}:\t?", addr);                          addr += 1; },
+             _ => { println!("{:#06X}:\t??? ({:#06X})", addr, opcode);      addr += 1; },
         }
     }
 }

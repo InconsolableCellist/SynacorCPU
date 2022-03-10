@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use crate::hypervisor_controller as hc;
 use crate::utils::*;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use crate::hypervisor_controller::disassemble_range;
 
 
 #[derive(Serialize, Deserialize)]
@@ -183,7 +184,8 @@ impl Machine {
      * panic occurs.
      */
     fn execute(&mut self, instruction:u16) {
-        if self.debug { println!(" opcode: {:#X} pc: {:#X} (offset {:#X}) step: {} ", instruction, self.pc, self.pc * 2, self.executed); }
+        // if self.debug { println!(" opcode: {:#X} pc: {:#X} (offset {:#X}) step: {} ", instruction, self.pc, self.pc * 2, self.executed); }
+        if self.debug { disassemble_range(self, self.pc-1, self.pc-1); }
         io::stdout().flush().unwrap();
         self.executed += 1;
         match instruction {
@@ -350,7 +352,7 @@ impl Machine {
      */
     fn jmp(&mut self) {
         self.pc = self.peek_inc();
-        if self.debug { print!(" (jmp {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+        // if self.debug { print!(" (jmp {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
     }
 
     /**
@@ -367,7 +369,7 @@ impl Machine {
         let dest = self.peek_inc();
         if val != 0 {
             self.pc = dest;
-            if self.debug { print!(" (jt {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+            // if self.debug { print!(" (jt {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -385,7 +387,7 @@ impl Machine {
 
         if val == 0 {
             self.pc = dest;
-            if self.debug { print!(" (jf {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
+            // if self.debug { print!(" (jf {:#X} (byte offset in file: {:#X})) ", self.pc, self.pc * 2); }
         }
     }
 
@@ -427,7 +429,7 @@ impl Machine {
             c = self.peek(c);
         }
 
-        if self.debug { println!("b: {:#X} c: {:#X}", b, c); }
+        // if self.debug { println!("b: {:#X} c: {:#X}", b, c); }
         b = b.wrapping_mul(c) % TOM as u16;
 
         self.poke(dest, b)
@@ -458,7 +460,7 @@ impl Machine {
         let mut b:u16 = self.peek_inc();
         let mut c:u16 = self.peek_inc();
 
-        if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+        // if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
 
         // a value between TOM and TOM + NUM_REG inclusive refers to a register location instead
         if b >= TOM as u16 {
@@ -468,7 +470,7 @@ impl Machine {
             c = self.peek(c);
         }
 
-        if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
+        // if self.debug { println!("dest: {}, b: {}, c: {}", dest, b, c); }
 
         self.poke(dest, b%c);
     }
@@ -539,7 +541,7 @@ impl Machine {
         if value >= TOM as u16 {
             value = self.peek(value);
         }
-        if self.debug { println!("storing into {:#X} the value contained in {:#X}, which is {:#X}", dest, source, value); }
+        // if self.debug { println!("storing into {:#X} the value contained in {:#X}, which is {:#X}", dest, source, value); }
 
         self.poke(dest, value);
     }
@@ -557,7 +559,7 @@ impl Machine {
         if value >= TOM as u16 {
             value = self.peek(value);
         }
-        if self.debug { println!("writing mem location {:#X} with the value {:#X}", dest, value); }
+        // if self.debug { println!("writing mem location {:#X} with the value {:#X}", dest, value); }
 
         self.poke(dest, value);
     }
@@ -621,6 +623,7 @@ impl Machine {
                 'p' => hc::print_regs(self),
                 'g' => hc::goto_and_run(self),
                 'x' => hc::examine_memory(self),
+                'w' => hc::write_memory(self),
                 'r' => { println!("returning execution to guest...\n***\n\n"); break; },
                 '\n' => {},
                 _ => println!("{}", {
@@ -632,11 +635,13 @@ impl Machine {
                      p - Print registers\n\
                      g - Goto and run: g NNNN\n\
                      x - eXamine memory: x SSSS EEEE\n\
+                     w - Write memory: w NNNN v\n\
                      r - Return to guest\n\
                      \n\
                      NNNN memory location in hex\n\
                      SSSS start memory location in hex\n\
                      EEEE end memory location in hex\n\
+                     v value in hex\n\
                      "
                 }),
             }
